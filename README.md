@@ -1,6 +1,5 @@
 # PayPal Hackathon — GenDynamics
-
-> Unofficial hackathon project built with PayPal aPIs. Not affiliated with or endorsed by PayPal, Inc.
+ hackathon project built with PayPal aPIs. Not affiliated with or endorsed by PayPal, Inc.
 
 ## Project
 
