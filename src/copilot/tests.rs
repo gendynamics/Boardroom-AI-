@@ -6,7 +6,7 @@ use std::{
 
 use axum::{
     Json, Router,
-    body::to_bytes,
+    body::{Bytes, to_bytes},
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::Response,
@@ -90,7 +90,12 @@ fn tools_are_offered_only_when_permitted() {
         transaction_search: true,
         payouts: true,
     });
-    for expected in ["search_transactions", "list_invoices", "propose_invoice"] {
+    for expected in [
+        "search_transactions",
+        "list_invoices",
+        "propose_invoice",
+        "propose_collections_run",
+    ] {
         assert!(
             full.iter().any(|name| name == expected),
             "missing {expected}"
@@ -316,6 +321,8 @@ struct MockPayPal {
     base: String,
     scope: String,
     requests: Arc<StdMutex<Vec<Recorded>>>,
+    /// Invoices served by the list and detail endpoints; tests may change them mid-run.
+    invoices: Arc<StdMutex<Vec<Value>>>,
 }
 
 impl MockPayPal {
@@ -372,6 +379,7 @@ async fn spawn_paypal(scope: &str) -> MockPayPal {
         base,
         scope: scope.to_owned(),
         requests: Arc::default(),
+        invoices: Arc::default(),
     };
     let router = Router::new()
         .route(
@@ -406,8 +414,29 @@ async fn spawn_paypal(scope: &str) -> MockPayPal {
             }),
         )
         .route(
+            "/v2/invoicing/invoices/{id}",
+            get(|State(mock): State<MockPayPal>, Path(id): Path<String>| async move {
+                let found = mock.invoices.lock().unwrap().iter().find(|invoice| invoice["id"] == id.as_str()).cloned();
+                match found {
+                    Some(invoice) => (StatusCode::OK, Json(invoice)),
+                    None => (StatusCode::NOT_FOUND, Json(json!({ "name": "RESOURCE_NOT_FOUND" }))),
+                }
+            }),
+        )
+        .route(
+            "/v2/invoicing/invoices/{id}/remind",
+            post(|State(mock): State<MockPayPal>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<Value>| async move {
+                mock.record("POST", format!("/v2/invoicing/invoices/{id}/remind"), &headers, body);
+                StatusCode::NO_CONTENT
+            }),
+        )
+        .route(
             "/v2/invoicing/invoices",
-            post(|State(mock): State<MockPayPal>, headers: HeaderMap, Json(body): Json<Value>| async move {
+            get(|State(mock): State<MockPayPal>| async move {
+                let items = mock.invoices.lock().unwrap().clone();
+                Json(json!({ "total_items": items.len(), "items": items }))
+            })
+            .post(|State(mock): State<MockPayPal>, headers: HeaderMap, Json(body): Json<Value>| async move {
                 mock.record("POST", "/v2/invoicing/invoices".to_owned(), &headers, body);
                 (
                     StatusCode::CREATED,
@@ -575,6 +604,7 @@ async fn payment_link_is_only_created_after_merchant_approval() {
         State(state.clone()),
         HeaderMap::new(),
         Path(action_id.clone()),
+        Bytes::new(),
     )
     .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
@@ -585,6 +615,7 @@ async fn payment_link_is_only_created_after_merchant_approval() {
             State(state.clone()),
             same_origin_headers(),
             Path(action_id.clone()),
+            Bytes::new(),
         )
         .await,
     )
@@ -619,7 +650,12 @@ async fn payment_link_is_only_created_after_merchant_approval() {
     ));
 
     // A second approval cannot run it again.
-    let response = approve(State(state.clone()), same_origin_headers(), Path(action_id)).await;
+    let response = approve(
+        State(state.clone()),
+        same_origin_headers(),
+        Path(action_id),
+        Bytes::new(),
+    ).await;
     assert_eq!(response.status(), StatusCode::CONFLICT);
     assert_eq!(paypal.writes().len(), 1);
 }
@@ -705,6 +741,7 @@ async fn invoice_draft_is_created_with_the_reviewed_line_items() {
             State(state.clone()),
             same_origin_headers(),
             Path(action_id.clone()),
+            Bytes::new(),
         )
         .await,
     )
@@ -767,6 +804,7 @@ async fn refunds_are_limited_to_captured_orders_and_their_remaining_balance() {
             State(state.clone()),
             same_origin_headers(),
             Path(action_id.clone()),
+            Bytes::new(),
         )
         .await,
     )
@@ -819,7 +857,12 @@ async fn dismissed_proposals_cannot_be_approved() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["action"]["status"], "dismissed");
-    let response = approve(State(state.clone()), same_origin_headers(), Path(action_id)).await;
+    let response = approve(
+        State(state.clone()),
+        same_origin_headers(),
+        Path(action_id),
+        Bytes::new(),
+    ).await;
     assert_eq!(response.status(), StatusCode::CONFLICT);
     assert!(paypal.writes().is_empty());
 }
@@ -834,4 +877,212 @@ async fn ai_errors_are_reported_without_a_scripted_fallback() {
         .err()
         .unwrap();
     assert_eq!(error.0, "Could not reach the AI provider.");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Collections run
+
+fn open_invoice(id: &str, number: &str, email: &str, due: &str, due_date: &str) -> Value {
+    json!({
+        "id": id,
+        "status": "SENT",
+        "detail": { "invoice_number": number, "payment_term": { "due_date": due_date } },
+        "primary_recipients": [{ "billing_info": { "email_address": email, "name": { "given_name": "Dana" } } }],
+        "amount": { "currency_code": "USD", "value": due },
+        "due_amount": { "currency_code": "USD", "value": due }
+    })
+}
+
+/// A due date `days` before today, so tests do not depend on the calendar.
+fn days_ago(days: i64) -> String {
+    utc_timestamp(now_seconds() - days * 86_400)[..10].to_owned()
+}
+
+#[test]
+fn overdue_invoices_are_checked_and_ranked_from_paypal_data() {
+    let invoice = open_invoice("INV2-AAAA", "0042", "Buyer1@Example.com", "600.00", "2026-10-21");
+    let overdue = collections::overdue_invoice(&invoice, "2026-11-11").unwrap();
+    assert_eq!(overdue.days_overdue, 21);
+    assert_eq!(overdue.due_cents, 60_000);
+
+    assert!(collections::overdue_invoice(&invoice, "2026-10-21").is_err(), "due today");
+    let mut paid = invoice.clone();
+    paid["status"] = json!("PAID");
+    assert!(collections::overdue_invoice(&paid, "2026-11-11").is_err());
+    let mut real = invoice.clone();
+    real["primary_recipients"][0]["billing_info"]["email_address"] = json!("someone@gmail.com");
+    assert!(collections::overdue_invoice(&real, "2026-11-11").is_err());
+    let mut euros = invoice.clone();
+    euros["due_amount"]["currency_code"] = json!("EUR");
+    assert!(collections::overdue_invoice(&euros, "2026-11-11").is_err());
+    // A leap day sits between these dates.
+    let old = open_invoice("INV2-BBBB", "0007", "b@example.com", "600.00", "2024-02-28");
+    assert_eq!(collections::overdue_invoice(&old, "2024-03-01").unwrap().days_overdue, 2);
+
+    let mut ranked = vec![
+        collections::overdue_invoice(&open_invoice("INV2-SMALL", "1", "a@example.com", "40.00", "2026-09-01"), "2026-11-11").unwrap(),
+        overdue.clone(),
+        collections::overdue_invoice(&open_invoice("INV2-OLDER", "2", "c@example.com", "600.00", "2026-10-01"), "2026-11-11").unwrap(),
+    ];
+    collections::rank(&mut ranked);
+    let order: Vec<&str> = ranked.iter().map(|invoice| invoice.invoice_id.as_str()).collect();
+    assert_eq!(order, ["INV2-OLDER", "INV2-AAAA", "INV2-SMALL"]);
+}
+
+#[test]
+fn reminder_wording_must_match_the_invoices_and_their_numbers() {
+    let invoices = vec![
+        collections::overdue_invoice(&open_invoice("INV2-AAAA", "0042", "buyer1@example.com", "600.00", "2026-10-21"), "2026-11-11").unwrap(),
+        collections::overdue_invoice(&open_invoice("INV2-BBBB", "0043", "buyer2@example.com", "1240.00", "2026-11-01"), "2026-11-11").unwrap(),
+    ];
+    let row = |id: &str, note: &str| json!({ "invoice_id": id, "reason": "Largest balance", "subject": "Reminder: your invoice is past due", "note": note });
+    let reply = |rows: Vec<Value>| format!("```json\n{}\n```", json!({ "items": rows }));
+
+    let good = reply(vec![
+        row("INV2-AAAA", "Hi Dana, invoice 0042 for $600 is 21 days past due. Please arrange payment."),
+        row("INV2-BBBB", "Hi Dana, a quick nudge: $1,240.00 was due on 2026-11-01, 10 days ago."),
+    ]);
+    let items = collections::parse_notes(&good, &invoices).unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|item| item.selected));
+    assert_eq!(items[1].due_cents, 124_000);
+
+    let invented = reply(vec![
+        row("INV2-AAAA", "Invoice 0042 for $650 is past due."),
+        row("INV2-BBBB", "A quick nudge."),
+    ]);
+    assert!(collections::parse_notes(&invented, &invoices).unwrap_err().contains("650"));
+    let reordered = reply(vec![row("INV2-BBBB", "A nudge."), row("INV2-AAAA", "A nudge.")]);
+    assert!(collections::parse_notes(&reordered, &invoices).is_err());
+    let dropped = reply(vec![row("INV2-AAAA", "A nudge.")]);
+    assert!(collections::parse_notes(&dropped, &invoices).is_err());
+    let mut long_subject = row("INV2-AAAA", "A nudge.");
+    long_subject["subject"] = json!("x".repeat(70));
+    assert!(collections::parse_notes(&reply(vec![long_subject, row("INV2-BBBB", "A nudge.")]), &invoices).is_err());
+    assert!(collections::parse_notes("Sorry, I cannot help.", &invoices).is_err());
+}
+
+async fn record_sent_invoice(state: &AppState, id: &str) {
+    state.ledger.lock().await.data.invoices.push(crate::ledger::InvoiceRecord {
+        id: id.to_owned(),
+        created_at: now_seconds(),
+        recipient: "buyer@example.com".to_owned(),
+        amount_cents: 0,
+        status: "sent".to_owned(),
+    });
+}
+
+#[tokio::test]
+async fn collections_run_reminds_only_selected_invoices_that_are_still_overdue() {
+    let paypal = spawn_paypal(ALL_SCOPES).await;
+    *paypal.invoices.lock().unwrap() = vec![
+        open_invoice("INV2-SMALL", "0041", "buyer3@example.com", "90.00", &days_ago(40)),
+        open_invoice("INV2-LARGE", "0042", "buyer1@example.com", "600.00", &days_ago(21)),
+        open_invoice("INV2-PAIDSOON", "0043", "buyer2@example.com", "250.00", &days_ago(5)),
+        open_invoice("INV2-NOTDUE", "0044", "buyer4@example.com", "900.00", &days_ago(-10)),
+        open_invoice("INV2-FOREIGN", "0045", "buyer5@example.com", "999.00", &days_ago(60)),
+    ];
+    let notes = json!({ "items": [
+        { "invoice_id": "INV2-LARGE", "reason": "Largest balance, three weeks late", "subject": "Reminder: invoice 0042 is past due", "note": "Hi Dana, invoice 0042 is 21 days past due. Please arrange payment this week." },
+        { "invoice_id": "INV2-PAIDSOON", "reason": "Recently due", "subject": "A quick nudge on invoice 0043", "note": "Hi Dana, a friendly nudge on invoice 0043." },
+        { "invoice_id": "INV2-SMALL", "reason": "Oldest, smallest balance", "subject": "Invoice 0041 needs a payment date", "note": "Hi Dana, invoice 0041 is 40 days past due. Please reply with a payment date." }
+    ] });
+    let (llm_mock, llm_base) = spawn_llm(vec![
+        tool_call("call_1", "propose_collections_run", json!({})),
+        final_reply(&notes.to_string()),
+        final_reply("Three reminders are ready for your review."),
+    ])
+    .await;
+    let state = test_state(&paypal.base, &llm_base);
+    for id in ["INV2-SMALL", "INV2-LARGE", "INV2-PAIDSOON", "INV2-NOTDUE"] {
+        record_sent_invoice(&state, id).await;
+    }
+    let ai = state.ai.clone().unwrap();
+    let turn = run_agent(&state, &ai, Capabilities::from_scope(ALL_SCOPES), user("Chase my overdue invoices"))
+        .await
+        .map_err(|(error, _)| error)
+        .unwrap();
+
+    // The writer saw only the overdue invoices this app created, ranked by balance.
+    let writer_request = &llm_mock.requests.lock().unwrap()[1];
+    assert!(writer_request["tools"].is_null());
+    let input: Value = serde_json::from_str(writer_request["messages"][1]["content"].as_str().unwrap()).unwrap();
+    let ids: Vec<&str> = input.as_array().unwrap().iter().map(|row| row["invoice_id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["INV2-LARGE", "INV2-PAIDSOON", "INV2-SMALL"]);
+
+    let action = &turn.actions[0];
+    assert_eq!(action["kind"], "collections_run");
+    let run = &action["collections"];
+    assert_eq!(run["type"], "collections_run");
+    assert_eq!(run["proposal_id"], action["id"]);
+    assert_eq!(run["totals"], json!({ "count": 3, "amount_due": "940.00", "currency": "USD" }));
+    assert_eq!(run["items"][0]["days_overdue"], 21);
+    assert_eq!(run["items"][0]["selected"], true);
+    assert!(paypal.writes().is_empty(), "nothing is sent before approval");
+
+    let action_id = action["id"].as_str().unwrap().to_owned();
+    let approve_with = |body: Value| {
+        approve(
+            State(state.clone()),
+            same_origin_headers(),
+            Path(action_id.clone()),
+            Bytes::from(body.to_string()),
+        )
+    };
+    let (status, _) = body_json(approve_with(json!({ "invoice_ids": ["INV2-FOREIGN"] })).await).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "only invoices in the run can be selected");
+    let (status, _) = body_json(approve_with(json!({ "invoice_ids": [] })).await).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(paypal.writes().is_empty());
+
+    // One invoice is paid between the proposal and the approval; one is unticked.
+    paypal.invoices.lock().unwrap()[2]["status"] = json!("PAID");
+    let (status, body) = body_json(
+        approve_with(json!({ "invoice_ids": ["INV2-LARGE", "INV2-PAIDSOON"] })).await,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let result = &body["action"]["result"];
+    assert_eq!(result["reminded"], 1);
+    assert_eq!(result["results"][0]["outcome"], "reminded");
+    assert_eq!(result["results"][1]["outcome"], "skipped");
+    assert_eq!(body["action"]["collections"]["items"][2]["selected"], false);
+    assert_eq!(body["action"]["collections"]["totals"]["count"], 2);
+
+    let writes = paypal.writes();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(writes[0].path, "/v2/invoicing/invoices/INV2-LARGE/remind");
+    assert_eq!(writes[0].request_id.as_deref(), Some(format!("{action_id}-0").as_str()));
+    assert_eq!(writes[0].body["subject"], "Reminder: invoice 0042 is past due");
+    assert_eq!(writes[0].body["send_to_recipient"], true);
+
+    let (status, _) = body_json(approve_with(json!({})).await).await;
+    assert_eq!(status, StatusCode::CONFLICT, "a run is sent at most once");
+    assert_eq!(paypal.writes().len(), 1);
+}
+
+#[tokio::test]
+async fn collections_run_is_not_drafted_from_unusable_ai_wording() {
+    let paypal = spawn_paypal(ALL_SCOPES).await;
+    *paypal.invoices.lock().unwrap() =
+        vec![open_invoice("INV2-LARGE", "0042", "buyer1@example.com", "600.00", &days_ago(21))];
+    let invented = json!({ "items": [{ "invoice_id": "INV2-LARGE", "reason": "Only one", "subject": "Past due", "note": "You owe $725 for invoice 0042." }] });
+    let (_llm_mock, llm_base) = spawn_llm(vec![
+        tool_call("call_1", "propose_collections_run", json!({})),
+        final_reply(&invented.to_string()),
+        final_reply(&invented.to_string()),
+        final_reply("I could not draft the reminders."),
+    ])
+    .await;
+    let state = test_state(&paypal.base, &llm_base);
+    record_sent_invoice(&state, "INV2-LARGE").await;
+    let ai = state.ai.clone().unwrap();
+    let turn = run_agent(&state, &ai, Capabilities::from_scope(ALL_SCOPES), user("Chase my overdue invoices"))
+        .await
+        .map_err(|(error, _)| error)
+        .unwrap();
+    assert!(turn.actions.is_empty());
+    assert!(!turn.steps[0]["ok"].as_bool().unwrap());
+    assert!(turn.steps[0]["label"].as_str().unwrap().contains("725"));
+    assert!(paypal.writes().is_empty());
 }

@@ -20,14 +20,14 @@ It sits inside *The Boardroom*, a concept business workspace that also includes 
 |---|---|---|
 | **Meaningful PayPal integration** | Orders v2 (create, read, capture), Payments v2 (refunds), Payouts v1 (send money), Invoicing v2 (draft, list, send, remind, cancel), Transaction Search and Balances (reporting), OAuth 2.0 client credentials with **scope-based feature detection**, `PayPal-Request-Id` idempotency, JavaScript SDK CardFields with 3-D Secure, Sandbox negative testing, and PayPal MCP server configuration | [src/main.rs](src/main.rs), [src/copilot.rs](src/copilot.rs), [public/checkout-lab.js](public/checkout-lab.js) |
 | **Meaningful use of AI** | A tool-calling agent turns natural language into grounded PayPal reads and validated PayPal actions, with a human approval step for every money-moving action. The Boardroom brief has four AI advisors read the merchant's real figures and hand a first step back to the agent | [src/copilot.rs](src/copilot.rs), [src/boardroom.rs](src/boardroom.rs), [src/llm.rs](src/llm.rs), [public/copilot.js](public/copilot.js) |
-| **Working prototype** | `cargo run` serves the full app. Verified against live PayPal Sandbox on 7 Nov 2026 (real orders created and read back) and 8 Nov 2026 (payment request, Payouts batch, activity record surviving a restart). 52 Rust and 31 browser-logic tests, including full agent runs and workspace flows against a mock LLM and a mock PayPal | [Run it](#run-it-locally), [Tests](#tests) |
+| **Working prototype** | `cargo run` serves the full app. Verified against live PayPal Sandbox on 7 Nov 2026 (real orders created and read back) and 8 Nov 2026 (payment request, Payouts batch, activity record surviving a restart). 56 Rust and 32 browser-logic tests, including full agent runs and workspace flows against a mock LLM and a mock PayPal | [Run it](#run-it-locally), [Tests](#tests) |
 | **Documentation** | This README: demo script, architecture, tool catalog, safety model, setup, limitations | You are here |
 
 ---
 
 ## 3-minute demo script
 
-Start the app ([setup below](#run-it-locally)), open `http://localhost:3000`, and choose **Boardroom AI → Copilot**. The status chips show which AI model is connected and which PayPal features the Sandbox app is permitted to use.
+Start the app ([setup below](#run-it-locally)), open `http://localhost:3000`, and choose **Boardroom AI → Copilot**. In the app the Copilot is named **Neon Pal**, and it is built into every page: the **Ask Neon Pal** button opens the same chat as a docked panel on desktop and a full-screen sheet on phones ([public/neon-pal.js](public/neon-pal.js)). The site also ships a web app manifest, so it can be added to a phone home screen. The status chips show which AI model is connected and which PayPal features the Sandbox app is permitted to use.
 
 1. **Payment link (Orders v2).** Click **$45 payment link**.
    - The Copilot calls `propose_payment_link`. A review card shows the amount and description, marked *"Nothing has been sent to PayPal yet."*
@@ -88,6 +88,9 @@ sequenceDiagram
 | `propose_payment_link` | `POST /v2/checkout/orders` | Proposal (needs approval) | Always |
 | `propose_refund` | `POST /v2/payments/captures/{id}/refund` | Proposal (needs approval) | Always |
 | `propose_invoice` | `POST /v2/invoicing/invoices` (then `/send`) | Proposal (needs approval) | Token has Invoicing scope |
+| `propose_collections_run` | `GET /v2/invoicing/invoices`, then `POST /v2/invoicing/invoices/{id}/remind` per invoice | Proposal (needs approval) | Token has Invoicing scope |
+
+**Collections run.** Ask the Copilot to chase overdue invoices (or click **Chase overdue invoices**). The server reads the invoices from PayPal, keeps the overdue USD ones created and sent through this app, and ranks them by balance (up to 10). A second, narrow AI call writes only the wording for that fixed list: a reason, a subject, and a note whose tone follows the days overdue. The wording is rejected unless it covers the same invoices in the same order and states no number that is absent from PayPal's data. The review card has a checkbox per invoice; approval sends only the ticked ones, and each invoice is re-read first so one that was paid in the meantime is skipped.
 
 The AI client speaks the OpenAI-compatible Chat Completions format with function calling, so it works with **xAI Grok** (default `grok-4.7`), **OpenAI**, or any compatible endpoint set with `AI_BASE_URL`.
 
@@ -140,8 +143,8 @@ Without an AI key, the rest of the workspace still runs; the Copilot and the Boa
 ## Tests
 
 ```bash
-cargo test                    # 52 backend tests
-node --test tests/*.test.js   # 31 browser-logic tests (Node.js 20+; no npm install needed)
+cargo test                    # 56 backend tests
+node --test tests/*.test.js   # 32 browser-logic tests (Node.js 20+; no npm install needed)
 ```
 
 Highlights:
@@ -186,6 +189,14 @@ Every page reads from, or acts on, PayPal Sandbox. The server keeps a record of 
 
 ---
 
+## Neon Pal 3D playbook (demo page)
+
+`/boardroom.html` is a separate showcase page, linked from the Copilot page. It shows the Neon Pal 3D avatar next to four board seats (Strategist, Marketer, CFO, Growth Lead) and answers growth questions about PayPal as a business.
+
+- **It is not live AI.** Answers are looked up by keyword overlap from a synthetic dataset of 110 examples ([public/boardroom_dataset.jsonl](public/boardroom_dataset.jsonl)). The page says so on screen. The live AI in this submission is the Copilot and the Boardroom brief.
+- **Dataset.** `python setup_neon_pal.py` regenerates the page and the dataset. The dataset is in chat format (system / user / assistant) so it can be used to fine-tune a model later; [dataset/push_dataset.py](dataset/push_dataset.py) and [dataset/pull_dataset.py](dataset/pull_dataset.py) publish it to and fetch it from Hugging Face.
+- **Avatar.** [public/neon-pal-avatar.js](public/neon-pal-avatar.js) renders the GLB with three.js, loaded from the unpkg CDN, so the page needs internet access. The GLB's two bundled clips (Running, Walking) distort the mesh, so the avatar holds its rest pose and moves with code instead; clips whose names contain idle, think, or talk are used automatically if a future GLB includes them.
+
 ## Limitations and notes
 
 - **Prototype, not production.** There is no login, and the server binds to `127.0.0.1`. Orders, captures, refunds, payouts, invoices, and the profile persist in `data/ledger.json`; pending Copilot proposals are held in memory and expire on restart. Do not deploy as-is.
@@ -211,6 +222,8 @@ public/workspace.js     Send & request, Invoicing, Settings
 public/boardroom.js     Boardroom brief and experiment hand-off to Copilot
 public/copilot.js       Copilot chat UI: step trace, review cards, approvals
 public/*.js, *.html     Checkout Lab (CardFields), Sandbox purchase, navigation
+public/boardroom.html   Neon Pal 3D playbook demo page (neon-pal-chat.js, neon-pal-avatar.js, boardroom-layout.css)
+setup_neon_pal.py       Generates the playbook page and its synthetic dataset (dataset/, public/boardroom_dataset.jsonl)
 tests/*.test.js       Browser-logic tests run with Node's built-in test runner
 ```
 

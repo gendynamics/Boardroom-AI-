@@ -1,6 +1,6 @@
 "use strict";
 
-// Boardroom Copilot: chat with an AI agent that reads PayPal Sandbox data and drafts actions.
+// Boardroom Copilot (shown to the merchant as "Neon Pal"): chat with an AI agent that reads PayPal Sandbox data and drafts actions.
 // The server runs the agent; this page shows its steps and renders each proposed action as a
 // review card. Only the merchant's click on Approve asks the server to call PayPal.
 (() => {
@@ -11,6 +11,7 @@
   const badge = document.querySelector("#copilot-badge");
   const suggestions = document.querySelector("#copilot-suggestions");
   const submitButton = form.querySelector("button");
+  const BOT_NAME = "Neon Pal";
   const MAX_HISTORY = 12;
   const MAX_MESSAGE_CHARS = 2000;
   const STATUS_TEXT = {
@@ -63,7 +64,7 @@
 
   function stepsList(steps) {
     const list = node("ul", "copilot-steps");
-    list.setAttribute("aria-label", "What the Copilot checked");
+    list.setAttribute("aria-label", `What ${BOT_NAME} checked`);
     for (const step of steps) {
       list.append(node("li", step.ok ? "step-ok" : "step-failed", `${step.ok ? "✓" : "✕"} ${step.label}`));
     }
@@ -87,14 +88,85 @@
     }
   }
 
+  function toCents(amount) {
+    const match = /^(\d+)\.(\d{2})$/.exec(String(amount));
+    return match ? Number(match[1]) * 100 + Number(match[2]) : 0;
+  }
+
+  function formatUsd(cents) {
+    const dollars = String(Math.floor(cents / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return `$${dollars}.${String(cents % 100).padStart(2, "0")}`;
+  }
+
+  function reminderCount(count) {
+    return `${count} reminder${count === 1 ? "" : "s"}`;
+  }
+
+  const OUTCOME_TEXT = { reminded: "Reminder sent", skipped: "Skipped", failed: "Failed" };
+
+  // A collections run lists one reminder per overdue invoice. While it awaits approval the
+  // merchant can untick invoices; the total and the approve button follow the selection.
+  function collectionsList(action, onChange) {
+    const editable = action.status === "proposed";
+    const outcomes = new Map();
+    for (const entry of (action.result && action.result.results) || []) outcomes.set(entry.invoice_id, entry);
+    const list = node("ul", "action-items collection-items");
+    const boxes = [];
+    for (const item of action.collections.items) {
+      const cents = toCents(item.amount_due);
+      const row = node("li", item.selected ? "" : "collection-off");
+      const label = node("label", "collection-pick");
+      const box = node("input");
+      box.type = "checkbox";
+      box.checked = Boolean(item.selected);
+      box.disabled = !editable;
+      box.value = item.invoice_id;
+      box.setAttribute("aria-label", `Remind ${item.recipient} about ${item.invoice_id}`);
+      box.addEventListener("change", () => {
+        row.className = box.checked ? "" : "collection-off";
+        onChange();
+      });
+      boxes.push({ box, cents });
+      const days = `${item.days_overdue} day${item.days_overdue === 1 ? "" : "s"} overdue`;
+      const text = node("span");
+      text.append(
+        node("strong", "", item.recipient),
+        node("small", "", `${item.invoice_id} · ${days} · ${item.reason}`),
+        node("small", "collection-subject", item.subject),
+        node("small", "collection-note", item.note),
+      );
+      const outcome = outcomes.get(item.invoice_id);
+      if (outcome) {
+        const detail = outcome.message ? `: ${outcome.message}` : "";
+        text.append(node("small", `collection-outcome outcome-${outcome.outcome}`, `${OUTCOME_TEXT[outcome.outcome] || outcome.outcome}${detail}`));
+      }
+      label.append(box, text);
+      row.append(label, node("span", "action-amount", formatUsd(cents)));
+      list.append(row);
+    }
+    const selection = () => {
+      const picked = boxes.filter((entry) => entry.box.checked);
+      return {
+        ids: picked.map((entry) => entry.box.value),
+        cents: picked.reduce((sum, entry) => sum + entry.cents, 0),
+      };
+    };
+    return { list, selection };
+  }
+
   function resultParts(action) {
     const result = action.result || {};
+    if (action.kind === "collections_run") {
+      const unsent = (result.requested || 0) - (result.reminded || 0);
+      const rest = unsent > 0 ? ` ${unsent} not sent; see each invoice above.` : "";
+      return [node("p", "action-note", `PayPal accepted ${reminderCount(result.reminded || 0)}.${rest} Email delivery is not confirmed; check Sandbox.`)];
+    }
     if (action.kind === "payment_link" && isPayPalUrl(result.approvalUrl)) {
       const link = node("a", "button button-primary action-link", "Open PayPal Sandbox checkout ↗");
       link.href = result.approvalUrl;
       link.target = "_blank";
-      link.rel = "noopener";
-      const note = node("p", "action-note", `Order ${result.orderId} created. Pay with a Sandbox buyer account; this app captures the payment when PayPal sends the buyer back. Then ask the Copilot whether it was paid.`);
+      link.rel = "noopener noreferrer";
+      const note = node("p", "action-note", `Order ${result.orderId} created. Pay with a Sandbox buyer account; this app captures the payment when PayPal sends the buyer back. Then ask Neon Pal whether it was paid.`);
       return [link, note];
     }
     if (action.kind === "invoice" && result.invoiceId) {
@@ -136,17 +208,35 @@
       }
       parts.push(items);
     }
+    const isRun = Boolean(action.collections && Array.isArray(action.collections.items));
+    const totalValue = node("strong", "", action.total);
+    const approve = node("button", "button button-primary", action.approveLabel || "Approve");
+    let run = null;
+    if (isRun) {
+      const follow = () => {
+        const picked = run.selection();
+        totalValue.textContent = `${formatUsd(picked.cents)} USD`;
+        approve.textContent = `Send ${reminderCount(picked.ids.length)}`;
+        approve.disabled = picked.ids.length === 0;
+      };
+      run = collectionsList(action, follow);
+      parts.push(run.list);
+      follow();
+    }
     const total = node("div", "action-total");
-    total.append(node("span", "", action.kind === "refund" ? "Refund" : "Total"), node("strong", "", action.total));
+    const totalLabel = isRun ? "Amount due, selected" : action.kind === "refund" ? "Refund" : "Total";
+    total.append(node("span", "", totalLabel), totalValue);
     parts.push(total);
 
     const footer = node("div", "action-footer");
     if (action.status === "proposed") {
-      const approve = node("button", "button button-primary", action.approveLabel || "Approve");
       const dismiss = node("button", "button button-secondary", "Dismiss");
       approve.type = "button";
       dismiss.type = "button";
-      approve.addEventListener("click", () => decide(card, action, "approve", [approve, dismiss]));
+      approve.addEventListener("click", () => decide(
+        card, action, "approve", [approve, dismiss],
+        run ? { invoice_ids: run.selection().ids } : {},
+      ));
       dismiss.addEventListener("click", () => decide(card, action, "dismiss", [approve, dismiss]));
       footer.append(approve, dismiss, node("p", "action-note", "Nothing has been sent to PayPal yet."));
     } else if (action.status === "done") {
@@ -167,10 +257,10 @@
     }
   }
 
-  async function decide(card, action, verb, buttons) {
+  async function decide(card, action, verb, buttons, body) {
     for (const button of buttons) button.disabled = true;
     try {
-      const data = await postJson(`/api/copilot/actions/${encodeURIComponent(action.id)}/${verb}`, {});
+      const data = await postJson(`/api/copilot/actions/${encodeURIComponent(action.id)}/${verb}`, body || {});
       drawAction(card, data.action);
       announceChange();
     } catch (error) {
@@ -194,10 +284,10 @@
     input.value = "";
     addMessage("You", text, "ai-user");
     history.push({ role: "user", content: text });
-    const reply = addMessage("Copilot", "Checking PayPal Sandbox…", "ai-advisor ai-thinking");
+    const reply = addMessage(BOT_NAME, "Checking PayPal Sandbox…", "ai-advisor ai-thinking");
     try {
       const data = await postJson("/api/copilot/chat", { messages: history.slice(-MAX_HISTORY) });
-      const parts = [node("strong", "", "Copilot")];
+      const parts = [node("strong", "", BOT_NAME)];
       if (Array.isArray(data.steps) && data.steps.length) parts.push(stepsList(data.steps));
       parts.push(node("p", "", data.reply));
       for (const action of data.actions || []) parts.push(actionCard(action));
@@ -206,7 +296,7 @@
       history.push({ role: "assistant", content: String(data.reply).slice(0, MAX_MESSAGE_CHARS) });
     } catch (error) {
       history.pop();
-      const parts = [node("strong", "", "Copilot · error")];
+      const parts = [node("strong", "", `${BOT_NAME} · error`)];
       if (error.data && Array.isArray(error.data.steps) && error.data.steps.length) parts.push(stepsList(error.data.steps));
       parts.push(node("p", "", `${error.message} No scripted answer was substituted.`));
       reply.className = "ai-message ai-advisor ai-error";
@@ -271,7 +361,7 @@
       const prompt = event.detail && event.detail.prompt;
       if (!prompt) return;
       if (input.disabled) {
-        addMessage("Copilot", "The AI is off, so I can't draft this step. Add an AI key on the server and restart.", "ai-advisor ai-error");
+        addMessage(BOT_NAME, "The AI is off, so I can't draft this step. Add an AI key on the server and restart.", "ai-advisor ai-error");
         return;
       }
       ask(prompt);

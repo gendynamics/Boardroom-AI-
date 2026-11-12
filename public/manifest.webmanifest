@@ -1,0 +1,13 @@
+{
+  "name": "Boardroom · PayPal Sandbox workspace",
+  "short_name": "Boardroom",
+  "description": "Independent hackathon project: a PayPal Sandbox business workspace with the Neon Pal AI copilot.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fb",
+  "theme_color": "#f7f8fb",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

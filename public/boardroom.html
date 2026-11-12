@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Boardroom AI - Neon Pal</title>
+  <link rel="stylesheet" href="boardroom-layout.css" />
+  <script type="importmap">
+    {"imports": {"three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                 "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"}}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="back-link" href="/">&larr; Workspace</a>
+    <h1>Neon Pal Playbook</h1>
+    <span id="np-status" class="status-pill">Loading...</span>
+  </header>
+  <main class="boardroom">
+    <aside class="pal-column">
+      <div id="neon-pal-stage" class="pal-stage"></div>
+      <section class="neon-pal">
+        <div id="neon-pal-log" class="neon-pal-log"></div>
+        <form id="neon-pal-form" class="neon-pal-form">
+          <input id="neon-pal-input" type="text" autocomplete="off"
+                 placeholder="Ask the board: how do we win freelancers in Nigeria?" />
+          <button type="submit">Ask</button>
+        </form>
+        <p class="np-note">Demo playbook: answers are matched by keyword from a synthetic dataset, not generated live. Not affiliated with PayPal.</p>
+      </section>
+    </aside>
+    <section class="seats">
+      <article class="seat"><h3>Strategist</h3><p id="np-take-strategist" class="take">Awaiting a brief...</p></article>
+      <article class="seat"><h3>Marketer</h3><p id="np-take-marketer" class="take">Awaiting a brief...</p></article>
+      <article class="seat"><h3>CFO</h3><p id="np-take-cfo" class="take">Awaiting a brief...</p></article>
+      <article class="seat"><h3>Growth Lead</h3><p id="np-take-growth" class="take">Awaiting a brief...</p></article>
+    </section>
+  </main>
+  <script src="neon-pal-chat.js"></script>
+  <script type="module" src="neon-pal-avatar.js"></script>
+</body>
+</html>

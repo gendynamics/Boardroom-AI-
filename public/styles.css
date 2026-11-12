@@ -429,6 +429,13 @@ footer span { color: #cbcbd3; padding: 0 5px; }
 .action-items li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .action-items strong { display: block; color: var(--ink); font-size: 12px; }
 .action-items small { display: block; color: var(--muted); }
+.collection-pick { display: flex; align-items: flex-start; gap: 8px; min-width: 0; cursor: pointer; }
+.collection-pick input { margin: 2px 0 0; accent-color: var(--ink); }
+.collection-items .collection-subject { margin-top: 4px; color: var(--ink); }
+.collection-items .collection-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.collection-items .collection-off { opacity: .5; }
+.collection-items .collection-outcome { margin-top: 4px; color: var(--ink); }
+.collection-items .outcome-failed, .collection-items .outcome-skipped { color: #a33a3a; }
 .action-amount, .action-total strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .action-total { display: flex; justify-content: space-between; margin-top: 10px; color: var(--ink); font-size: 13px; }
 .action-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
@@ -477,4 +484,46 @@ select.range-button:focus-visible { outline: 3px solid #aaa5ff; outline-offset: 
 @media (max-width: 480px) {
   .form-row { grid-template-columns: 1fr; }
   .activity-row { flex-direction: column; gap: 6px; }
+}
+
+/* Neon Pal: the Copilot chat, docked on every page (panel on desktop, full-screen sheet on phones) */
+.pal-mark { flex-shrink: 0; width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: #12142b; color: #fff; font: 800 14px Manrope, sans-serif; box-shadow: inset 0 0 0 2px #7d76ff, 0 0 10px rgba(25, 211, 255, .55); }
+.pal-launcher { position: fixed; z-index: 40; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 9px; padding: 8px 16px 8px 8px; border: 0; border-radius: 999px; background: #635bff; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: 0 8px 24px rgba(99, 91, 255, .38), 0 0 0 1px rgba(25, 211, 255, .45); }
+.pal-launcher:hover { background: #5149e4; }
+.pal-launcher:focus-visible, .pal-dock-close:focus-visible, .pal-dock-expand:focus-visible { outline: 3px solid #aaa5ff; outline-offset: 2px; }
+.pal-launcher[hidden], .pal-dock[hidden] { display: none; }
+.pal-dock { position: fixed; z-index: 50; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); width: min(410px, calc(100vw - 40px)); height: min(640px, calc(100vh - 40px)); height: min(640px, calc(100dvh - 40px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #cbdcff; border-radius: 18px; background: linear-gradient(135deg, #f8fbff, #f4f3ff); box-shadow: 0 18px 50px rgba(29, 32, 48, .22), 0 0 0 1px rgba(25, 211, 255, .25); }
+.pal-dock-header { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 14px; border-bottom: 1px solid #dfe5f0; background: #fff; }
+.pal-dock-title { flex: 1; min-width: 0; display: grid; }
+.pal-dock-title strong { font: 800 14px Manrope, sans-serif; }
+.pal-dock-title span { color: var(--muted); font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pal-dock-expand { padding: 8px 6px; color: #4038c8; font-size: 11px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.pal-dock-expand:hover { text-decoration: underline; }
+.pal-dock-close { width: 36px; height: 36px; border: 0; border-radius: 50%; background: #f0efff; color: #4038c8; font-size: 20px; line-height: 1; cursor: pointer; }
+.pal-dock-close:hover { background: #e3e1ff; }
+.pal-dock-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 12px; }
+.pal-dock-note { margin: 0; padding: 8px 14px max(10px, env(safe-area-inset-bottom)); color: var(--muted); font-size: 10px; text-align: center; }
+.pal-chat.workspace-section { margin: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.pal-dock .pal-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pal-dock .ai-conversation { flex: 1; min-height: 0; max-height: none; margin: 8px 0; }
+.pal-dock .ai-message { max-width: 96%; }
+.pal-dock .copilot-suggestions { flex-shrink: 0; flex-wrap: nowrap; overflow-x: auto; margin-bottom: 8px; padding-bottom: 4px; scrollbar-width: thin; }
+.pal-dock .chip { flex-shrink: 0; }
+.pal-dock #ai-form label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.pal-dock .ai-input-row { flex-direction: row; }
+.pal-dock .ai-input-row input { flex: 1; min-width: 0; }
+.pal-dock #ai-form { margin-bottom: 4px; }
+.pal-dock .ai-input-row .button { align-self: auto; }
+.pal-home:empty::before { content: "Neon Pal is open in the dock."; color: var(--muted); font-size: 12px; }
+@media (max-width: 700px) {
+  .pal-launcher { right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom)); }
+  .pal-dock { inset: 0; width: auto; height: auto; border: 0; border-radius: 0; box-shadow: none; }
+  .pal-dock-header { padding-top: max(12px, env(safe-area-inset-top)); }
+  .pal-open, .pal-open body { overflow: hidden; }
+  main { padding-bottom: 76px; }
+  .pal-dock .ai-input-row input { font-size: 16px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pal-dock:not([hidden]) { animation: pal-rise .18s ease-out; }
+  @keyframes pal-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 }

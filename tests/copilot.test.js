@@ -198,6 +198,65 @@ test("dismissing a proposal shows that nothing was sent", async () => {
   assert.match(text(conversation), /Dismissed\. Nothing was sent to PayPal/);
 });
 
+test("a collections run sends only the invoices left ticked", async () => {
+  const run = {
+    ...PROPOSAL,
+    kind: "collections_run",
+    title: "Collections run · 2 overdue invoices",
+    fields: [],
+    total: "$850.00 USD",
+    approveLabel: "Send reminders",
+    collections: {
+      type: "collections_run",
+      proposal_id: "act-0123456789ab",
+      totals: { count: 2, amount_due: "850.00", currency: "USD" },
+      items: [
+        { invoice_id: "INV2-LARGE", recipient: "buyer1@example.com", amount_due: "600.00", days_overdue: 21, reason: "Largest balance, three weeks late", subject: "Reminder: invoice 0042 is past due", note: "Hi Dana, a quick nudge on invoice 0042.", selected: true },
+        { invoice_id: "INV2-SMALL", recipient: "buyer2@example.com", amount_due: "250.00", days_overdue: 1, reason: "Just past due", subject: "A quick nudge", note: "Hi Sam, a friendly nudge.", selected: true },
+      ],
+    },
+  };
+  const done = {
+    ...run,
+    status: "done",
+    result: { reminded: 1, requested: 1, results: [{ invoice_id: "INV2-LARGE", outcome: "reminded", message: null }] },
+  };
+  done.collections = { ...run.collections, items: [run.collections.items[0], { ...run.collections.items[1], selected: false }] };
+  const { elements, calls } = await createPage({
+    "/api/copilot/status": () => response(200, STATUS_OK),
+    "/api/copilot/chat": () => response(200, { reply: "Ready.", steps: [], actions: [run] }),
+    "/api/copilot/actions/act-0123456789ab/approve": () => response(200, { action: done }),
+  });
+  await ask(elements, "Chase my overdue invoices");
+  const conversation = elements.get("#ai-conversation");
+  assert.match(text(conversation), /21 days overdue · Largest balance/);
+  assert.match(text(conversation), /1 day overdue/);
+  assert.match(text(conversation), /Hi Dana, a quick nudge on invoice 0042\./);
+  assert.match(text(conversation), /\$850\.00 USD/);
+  const [approve] = all(conversation, (node) => node.textContent === "Send 2 reminders");
+  assert.ok(approve);
+
+  const boxes = all(conversation, (node) => node.type === "checkbox");
+  assert.equal(boxes.length, 2);
+  boxes[1].checked = false;
+  boxes[1].listeners.change();
+  assert.equal(approve.textContent, "Send 1 reminder");
+  assert.match(text(conversation), /\$600\.00 USD/);
+  boxes[0].checked = false;
+  boxes[0].listeners.change();
+  assert.equal(approve.disabled, true);
+  boxes[0].checked = true;
+  boxes[0].listeners.change();
+  assert.equal(approve.disabled, false);
+
+  await approve.listeners.click();
+  assert.equal(calls.at(-1).url, "/api/copilot/actions/act-0123456789ab/approve");
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), { invoice_ids: ["INV2-LARGE"] });
+  assert.match(text(conversation), /Reminder sent/);
+  assert.match(text(conversation), /PayPal accepted 1 reminder\./);
+  assert.equal(all(conversation, (node) => node.type === "checkbox").every((box) => box.disabled), true);
+});
+
 test("an approved invoice draft can then be sent through the existing send endpoint", async () => {
   const invoice = {
     ...PROPOSAL,

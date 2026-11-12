@@ -2,9 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#f7f8fb">
     <title>Boardroom · PayPal Sandbox business workspace</title>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon.svg">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Boardroom">
     <link rel="stylesheet" href="styles.css">
     <script src="app.js" defer></script>
     <script src="checkout-lab.js" defer></script>
@@ -12,6 +17,7 @@
     <script src="workspace.js" defer></script>
     <script src="boardroom.js" defer></script>
     <script src="copilot.js" defer></script>
+    <script src="neon-pal.js" defer></script>
     <script src="navigation.js" defer></script>
   </head>
   <body>
@@ -226,10 +232,12 @@
       </div>
 
       <section class="workspace-section ai-section" id="boardroom-ai" aria-labelledby="ai-heading">
-        <div class="workspace-heading"><div><p class="eyebrow">AI AGENT · PAYPAL SANDBOX</p><h2 id="ai-heading">Boardroom Copilot</h2><p>Ask about your PayPal Sandbox sales, orders, and invoices, or tell the Copilot what to bill. It drafts PayPal actions; you approve each one.</p></div><span class="workspace-badge" id="copilot-badge">CHECKING…</span></div>
+        <div class="workspace-heading"><div><p class="eyebrow">BOARDROOM COPILOT · AI AGENT · PAYPAL SANDBOX</p><h2 id="ai-heading">Neon Pal</h2><p>Neon Pal is the Boardroom Copilot. Ask about your PayPal Sandbox sales, orders, and invoices, or tell it what to bill. It drafts PayPal actions; you approve each one. It is also one tap away on every page, on phone and desktop.</p></div><span class="workspace-badge" id="copilot-badge">CHECKING…</span></div>
         <ul class="copilot-status" id="copilot-status" aria-label="Copilot connections"><li class="status-pending">Checking AI and PayPal Sandbox connections…</li></ul>
+        <div class="pal-home" id="pal-home">
+        <div class="pal-chat workspace-section" id="pal-chat">
         <div class="ai-conversation" id="ai-conversation" aria-live="polite">
-          <div class="ai-message ai-advisor"><strong>Copilot</strong><p>Hi! I can look up your PayPal Sandbox activity and draft payment links, invoices, and refunds. Nothing is created until you approve it. Try a prompt below.</p></div>
+          <div class="ai-message ai-advisor"><strong>Neon Pal</strong><p>Hi, I’m Neon Pal. I can look up your PayPal Sandbox activity and draft payment links, invoices, and refunds. Nothing is created until you approve it. Try a prompt below.</p></div>
         </div>
         <div class="copilot-suggestions" id="copilot-suggestions" aria-label="Example requests">
           <button type="button" class="chip" data-prompt="Create a $45 payment link for an Everyday Tote.">$45 payment link</button>
@@ -237,13 +245,17 @@
           <button type="button" class="chip" data-prompt="Invoice jordan@example.com for 3 hours of consulting at $60 an hour plus a $25 setup fee, due in 15 days.">Draft an invoice</button>
           <button type="button" class="chip" data-prompt="Summarize my PayPal Sandbox sales for the last 30 days. Who are my top customers?">30-day sales summary</button>
           <button type="button" class="chip" data-prompt="Which invoices are still unpaid or overdue?">Unpaid invoices</button>
+          <button type="button" class="chip" data-prompt="Chase my overdue invoices: draft a reminder for each one so I can review and send them.">Chase overdue invoices</button>
         </div>
         <form id="ai-form">
-          <label for="ai-question">Ask or instruct the Copilot</label>
+          <label for="ai-question">Ask or instruct Neon Pal</label>
           <div class="ai-input-row"><input id="ai-question" required maxlength="1000" autocomplete="off" placeholder="Invoice jordan@example.com for 3 hours at $60/hour, net 15"><button class="button button-primary" type="submit">Send <span aria-hidden="true">→</span></button></div>
         </form>
-        <p class="workspace-note">The Copilot sends your messages, and the PayPal Sandbox data it looks up, to the AI provider configured on the server (xAI or OpenAI). It cannot move money on its own: every payment link, invoice, or refund appears as a card for you to approve, and only Sandbox test money is used. Do not enter real personal or payment information.</p>
+        </div>
+        </div>
+        <p class="workspace-note">Neon Pal sends your messages, and the PayPal Sandbox data it looks up, to the AI provider configured on the server (xAI or OpenAI). It cannot move money on its own: every payment link, invoice, or refund appears as a card for you to approve, and only Sandbox test money is used. Do not enter real personal or payment information.</p>
         <a class="workspace-inline-link" href="#boardroom">How the Boardroom works →</a>
+        &nbsp;&nbsp;<a class="workspace-inline-link" href="boardroom.html">Neon Pal 3D playbook (demo) →</a>
       </section>
 
       <section class="boardroom-hero" id="boardroom" aria-labelledby="boardroom-heading">
@@ -393,5 +405,19 @@
       </div>
       <footer>THE BOARDROOM <span>·</span> HACKATHON PROJECT <span>·</span> PAYPAL SANDBOX ONLY</footer>
     </main>
+    <button class="pal-launcher" id="pal-launcher" type="button" aria-haspopup="dialog" aria-controls="pal-dock" aria-expanded="false" hidden>
+      <span class="pal-mark" aria-hidden="true">N</span>
+      <span class="pal-launcher-label">Ask Neon Pal</span>
+    </button>
+    <aside class="pal-dock" id="pal-dock" role="dialog" aria-labelledby="pal-dock-title" hidden>
+      <header class="pal-dock-header">
+        <span class="pal-mark" aria-hidden="true">N</span>
+        <div class="pal-dock-title"><strong id="pal-dock-title">Neon Pal</strong><span>Boardroom Copilot · PayPal Sandbox</span></div>
+        <a class="pal-dock-expand" id="pal-expand" href="#boardroom-ai" aria-label="Open Neon Pal full page">Full page</a>
+        <button class="pal-dock-close" id="pal-close" type="button" aria-label="Close Neon Pal">×</button>
+      </header>
+      <div class="pal-dock-body" id="pal-dock-body"></div>
+      <p class="pal-dock-note">Nothing reaches PayPal until you approve it. Sandbox test money only.</p>
+    </aside>
   </body>
 </html>

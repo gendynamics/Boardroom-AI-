@@ -96,6 +96,7 @@
     position.textContent = `${page.category.label} / ${page.label}`;
     previous.disabled = index === 0;
     next.disabled = index === pages.length - 1;
+    document.dispatchEvent(new CustomEvent("boardroom:page", { detail: { id: page.id, category: page.category.id } }));
     if (focus) {
       window.scrollTo({ top: 0, behavior: "instant" });
       page.element.focus({ preventScroll: true });
